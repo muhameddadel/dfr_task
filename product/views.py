@@ -40,28 +40,21 @@ def product_detail(request, pk):
         return Response(serializer.data)
     elif request.method == 'PUT':
         if product:
-            # Serialize the existing product without applying validation
             serializer = ProductSerializer(product, data=request.data, partial=True)
 
-            with transaction.atomic():
-                try:
-                    # Perform a full clean validation, including signal checks
-                    serializer.is_valid(raise_exception=True)
-
-                    # Save the updated product
-                    serializer.save()
-                    return Response(serializer.data)
-                except CategoryProductLimitExceeded as e:
-                    # If validation fails, return the error message
-                    return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                serializer.is_valid(raise_exception=True)
+                serializer.save()
+                return Response(serializer.data)
+            except CategoryProductLimitExceeded as e:
+                return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         else:
-            # Product doesn't exist, return a 404 response
             return Response(status=status.HTTP_404_NOT_FOUND)
     elif request.method == 'DELETE':
         product.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-        
+
 # custom endpoint 
 @api_view(['GET'])
 def custom_product_list(request):
