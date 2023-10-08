@@ -1,12 +1,16 @@
 from django.http import JsonResponse
+from django.core.exceptions import ValidationError
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Sum
+from django.db import transaction
 import datetime
 
 from .models import Product
 from .serializers import ProductSerializer
+
+from .exceptions import CategoryProductLimitExceeded  # Import the custom exception
 
 @api_view(['GET', 'POST'])
 def product_list(request):
@@ -16,10 +20,13 @@ def product_list(request):
         return Response(serializer.data)
     elif request.method == 'POST':
         serializer = ProductSerializer(data=request.data)
-        if serializer.is_valid():
+        try:
+            serializer.is_valid(raise_exception=True)
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except CategoryProductLimitExceeded as e:
+            return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 @api_view(['GET', 'PUT', 'DELETE'])
 def product_detail(request, pk):
@@ -32,16 +39,29 @@ def product_detail(request, pk):
         serializer = ProductSerializer(product)
         return Response(serializer.data)
     elif request.method == 'PUT':
-        serializer = ProductSerializer(product, data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if product:
+            # Serialize the existing product without applying validation
+            serializer = ProductSerializer(product, data=request.data, partial=True)
+
+            with transaction.atomic():
+                try:
+                    # Perform a full clean validation, including signal checks
+                    serializer.is_valid(raise_exception=True)
+
+                    # Save the updated product
+                    serializer.save()
+                    return Response(serializer.data)
+                except CategoryProductLimitExceeded as e:
+                    # If validation fails, return the error message
+                    return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Product doesn't exist, return a 404 response
+            return Response(status=status.HTTP_404_NOT_FOUND)
     elif request.method == 'DELETE':
         product.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-
+        
 # custom endpoint 
 @api_view(['GET'])
 def custom_product_list(request):
